@@ -15,7 +15,7 @@
 <body>
 <h3>FP self-test</h3>
 <p>Buka di browser hasil fork Anda. Jalankan sekali dengan komponen yang ingin dites aktif. Bandingkan dengan semua komponen mati.</p>
-<button id="go">Jalankan</button><button id="copy">Copy laporan</button>
+<button id="go">Jalankan</button><button id="copy">Copy laporan</button><button id="copyfail">Hanya FAIL</button>
 <div id="res"></div>
 <textarea id="out" readonly></textarea>
 <script>
@@ -412,6 +412,15 @@
     const fails = report.filter(function (r) { return r.kind === 'fail'; }).length;
     add('info', 'Selesai', fails + ' FAIL dari ' + report.filter(function (r) { return r.kind !== 'info'; }).length + ' cek');
     document.getElementById('out').value = report.map(function (r) { return r.kind.toUpperCase() + ' ' + r.name + (r.detail ? ' :: ' + r.detail : ''); }).join(String.fromCharCode(10));
+  };
+  document.getElementById('copyfail').onclick = function () {
+    const NL = String.fromCharCode(10);
+    const o = document.getElementById('out');
+    const keep = o.value.split(NL).filter(function (l) {
+      return l.indexOf('FAIL') === 0 || l.indexOf('INFO iframe baru') === 0 || l.indexOf('INFO Selesai') === 0 || l.indexOf('INFO Worker') === 0;
+    });
+    o.value = keep.join(NL); o.select();
+    try { document.execCommand('copy'); } catch (e) {}
   };
   document.getElementById('copy').onclick = function () {
     const o = document.getElementById('out'); o.select();
