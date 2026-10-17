@@ -3,275 +3,419 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API surface dump / compare</title>
+<title>FP self-test</title>
 <style>
   body { font-family: sans-serif; margin: 12px; font-size: 14px; }
-  button { padding: 8px 14px; font-size: 14px; margin: 4px 6px 4px 0; cursor: pointer; }
-  textarea { width: 100%; height: 20vh; font-family: monospace; font-size: 11px; margin-top: 6px; box-sizing: border-box; }
-  .sec { border-top: 2px solid #888; margin-top: 14px; padding-top: 6px; }
-  .k { font-weight: bold; margin-top: 8px; }
-  .a { color: #0a5; } .b { color: #c0182d; } .v { color: #555; }
-  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 2px 0; }
-  .file-input { margin: 4px 0; font-size: 12px; }
-  .box-label { font-weight: bold; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
-  .char-count { font-weight: normal; font-size: 12px; color: #666; }
+  button { padding: 10px 16px; font-size: 16px; margin-right: 8px; }
+  .row { padding: 4px 6px; border-bottom: 1px solid #ccc; word-break: break-word; }
+  .pass { color: #0a7d2c; } .fail { color: #c0182d; font-weight: bold; } .info { color: #555; }
+  textarea { width: 100%; height: 30vh; margin-top: 12px; font-family: monospace; font-size: 11px; }
 </style>
 </head>
 <body>
-<h3>API surface dump / compare</h3>
-<p>
-  1) Jalankan <b>Dump</b> lalu <b>Download JSON</b> di Chrome Asli (HP yang sama).<br>
-  2) Jalankan <b>Dump</b> lalu <b>Download JSON</b> di Browser Fork Anda.<br>
-  3) Pilih file JSON untuk kotak A dan B (atau tempel manual), lalu tekan <b>Bandingkan A dan B</b>.
-</p>
-
-<div>
-  <button id="dump">1. Dump (browser ini)</button>
-  <button id="download">2. Download JSON Dump</button>
-  <button id="copy">Copy ke Clipboard</button>
-  <button id="cmp" style="background:#0275d8; color:#fff; border:none; font-weight:bold;">3. Bandingkan A dan B</button>
-</div>
-
-<div class="box-label">
-  <span>A = Chrome Asli</span>
-  <span id="countA" class="char-count">0 karakter</span>
-</div>
-<input type="file" id="fileA" class="file-input" accept=".json,text/plain">
-<textarea id="A" placeholder="Tempel JSON Chrome Asli di sini atau upload file di atas..."></textarea>
-
-<div class="box-label">
-  <span>B = Browser Fork</span>
-  <span id="countB" class="char-count">0 karakter</span>
-</div>
-<input type="file" id="fileB" class="file-input" accept=".json,text/plain">
-<textarea id="B" placeholder="Tempel JSON Browser Fork di sini atau upload file di atas..."></textarea>
-
-<div class="box-label">
-  <span>Hasil Dump / Ringkasan Perbandingan</span>
-</div>
+<h3>FP self-test</h3>
+<p>Buka di browser hasil fork Anda. Jalankan sekali dengan komponen yang ingin dites aktif. Bandingkan dengan semua komponen mati.</p>
+<button id="go">Jalankan</button><button id="copy">Copy laporan</button>
+<div id="res"></div>
 <textarea id="out" readonly></textarea>
-<div id="report"></div>
-
 <script>
 (function () {
-  function sortedNames(o) { try { return Object.getOwnPropertyNames(o).sort(); } catch (e) { return []; } }
-  function has(o, k) { try { return k in o; } catch (e) { return false; } }
-  function typ(f) { try { return typeof f(); } catch (e) { return 'error'; } }
+  const resEl = document.getElementById('res');
+  const report = [];
+  function add(kind, name, detail) {
+    report.push({ kind: kind, name: name, detail: detail === undefined ? '' : String(detail) });
+    const d = document.createElement('div');
+    d.className = 'row ' + kind;
+    d.textContent = (kind === 'pass' ? 'PASS  ' : kind === 'fail' ? 'FAIL  ' : 'INFO  ') + name +
+                    (detail ? ' :: ' + detail : '');
+    resEl.appendChild(d);
+  }
+  function check(ok, name, detail) { add(ok ? 'pass' : 'fail', name, detail); }
 
-  async function dump() {
-    const d = {};
-    d.window = sortedNames(window).filter(function (k) { return !/^\d+$/.test(k); });
-    d.navigatorProto = sortedNames(Navigator.prototype);
-    d.navigatorOwn = sortedNames(navigator);
-    d.documentProto = sortedNames(Document.prototype);
-    d.elementProto = sortedNames(Element.prototype);
-    d.htmlElementCtors = d.window.filter(function (k) { return /^HTML.*Element$/.test(k) || /^SVG.*Element$/.test(k); });
-    d.cssProto = sortedNames(CSSStyleDeclaration.prototype).length;
-    d.chromeObject = (typeof window.chrome === 'object' && window.chrome) ? sortedNames(window.chrome) : null;
-    d.chromeRuntime = (window.chrome && window.chrome.runtime) ? sortedNames(window.chrome.runtime) : null;
+  const NATIVE_RE = /^function (get |set )?[\w$]*\(\) \{ \[native code\] \}$/;
 
-    d.scalars = {
-      platform: navigator.platform, vendor: navigator.vendor, vendorSub: navigator.vendorSub, product: navigator.product,
-      productSub: navigator.productSub, appName: navigator.appName, appCodeName: navigator.appCodeName,
-      appVersion: navigator.appVersion, language: navigator.language, languages: (navigator.languages || []).join(','),
-      hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory,
-      maxTouchPoints: navigator.maxTouchPoints, cookieEnabled: navigator.cookieEnabled, onLine: navigator.onLine,
-      webdriver: navigator.webdriver, doNotTrack: String(navigator.doNotTrack), gpc: String(navigator.globalPrivacyControl),
-      pdfViewerEnabled: navigator.pdfViewerEnabled, plugins: navigator.plugins ? navigator.plugins.length : null,
-      mimeTypes: navigator.mimeTypes ? navigator.mimeTypes.length : null,
-      pluginNames: navigator.plugins ? Array.prototype.map.call(navigator.plugins, function (p) { return p.name; }).join(',') : null,
-      screen: [screen.width, screen.height, screen.availWidth, screen.availHeight, screen.colorDepth, screen.pixelDepth].join('x'),
-      dpr: window.devicePixelRatio, inner: window.innerWidth + 'x' + window.innerHeight, outer: window.outerWidth + 'x' + window.outerHeight,
-      visualViewport: window.visualViewport ? window.visualViewport.width + 'x' + window.visualViewport.height + '@' + window.visualViewport.scale : null,
-      orientation: screen.orientation ? screen.orientation.type + '/' + screen.orientation.angle : null,
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone, tzOffset: new Date().getTimezoneOffset(),
-      locale: Intl.DateTimeFormat().resolvedOptions().locale,
-      secure: window.isSecureContext, crossOriginIsolated: window.crossOriginIsolated,
-      typeofChrome: typeof window.chrome, typeofNotification: typeof window.Notification,
-      notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : null,
-      mediaDevices: typ(function () { return navigator.mediaDevices; }),
-      connection: navigator.connection ? [navigator.connection.effectiveType, navigator.connection.rtt, navigator.connection.downlink, navigator.connection.saveData].join('/') : null,
-      speechVoices: window.speechSynthesis ? speechSynthesis.getVoices().length : null,
-      stackSample: (function () { try { null.x; } catch (e) { return String(e.message); } })()
-    };
-
-    d.features = {};
-    ['bluetooth', 'usb', 'serial', 'hid', 'share', 'canShare', 'contacts', 'getBattery', 'wakeLock', 'xr', 'gpu', 'ink',
-     'credentials', 'storage', 'locks', 'clipboard', 'geolocation', 'permissions', 'serviceWorker', 'mediaSession',
-     'presentation', 'virtualKeyboard', 'windowControlsOverlay', 'userActivation', 'managed', 'scheduling'].forEach(function (k) {
-      d.features['navigator.' + k] = has(navigator, k);
-    });
-    ['showOpenFilePicker', 'webkitRequestFileSystem', 'requestFileSystem', 'webkitSpeechRecognition', 'SpeechRecognition',
-     'RTCPeerConnection', 'webkitRTCPeerConnection', 'BarcodeDetector', 'EyeDropper', 'PaymentRequest', 'PresentationRequest',
-     'SharedWorker', 'AudioWorklet', 'OffscreenCanvas', 'WebAssembly', 'VideoDecoder', 'AudioDecoder', 'FileSystemHandle',
-     'DeviceMotionEvent', 'DeviceOrientationEvent', 'TouchEvent', 'PointerEvent', 'Gyroscope', 'Accelerometer', 'AmbientLightSensor',
-     'ScreenDetailed', 'Highlight', 'CSSPropertyRule', 'ViewTransition', 'SpeechSynthesisUtterance', 'MediaRecorder',
-     'ImageCapture', 'RemotePlayback', 'NetworkInformation', 'CookieStore', 'LaunchQueue', 'BeforeInstallPromptEvent'].forEach(function (k) {
-      d.features['window.' + k] = has(window, k);
-    });
-
-    d.css = {};
-    [['display', 'grid'], ['display', 'contents'], ['color', 'color(display-p3 1 0 0)'], ['width', 'min(1px, 2px)'],
-     ['aspect-ratio', '1/1'], ['backdrop-filter', 'blur(2px)'], ['-webkit-app-region', 'drag'], ['container-type', 'inline-size'],
-     ['text-wrap', 'balance'], ['scroll-timeline', 'none'], ['field-sizing', 'content'], ['anchor-name', '--a'],
-     ['overscroll-behavior', 'contain'], ['accent-color', 'red'], ['-webkit-text-stroke', '1px red'], ['font-variant-emoji', 'text']].forEach(function (p) {
-      d.css[p[0] + ':' + p[1]] = CSS.supports(p[0], p[1]);
-    });
-
-    d.media = {};
-    ['(pointer: coarse)', '(pointer: fine)', '(any-pointer: coarse)', '(hover: none)', '(hover: hover)', '(any-hover: none)',
-     '(prefers-color-scheme: dark)', '(prefers-reduced-motion: reduce)', '(prefers-contrast: more)', '(display-mode: standalone)',
-     '(display-mode: browser)', '(color-gamut: p3)', '(dynamic-range: high)', '(forced-colors: active)', '(orientation: portrait)',
-     '(inverted-colors: inverted)', '(scripting: enabled)', '(update: fast)', '(overflow-block: scroll)'].forEach(function (q) {
-      d.media[q] = window.matchMedia(q).matches;
-    });
-
-    d.uaData = null;
-    if (navigator.userAgentData) {
-      d.uaData = { keys: sortedNames(Object.getPrototypeOf(navigator.userAgentData)), mobile: navigator.userAgentData.mobile, platform: navigator.userAgentData.platform };
-      try { d.uaData.high = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'wow64', 'formFactors']); } catch (e) { d.uaData.high = String(e); }
-    }
-
-    d.perms = {};
-    for (const n of ['geolocation', 'notifications', 'camera', 'microphone', 'clipboard-read', 'persistent-storage', 'midi', 'accelerometer', 'background-sync']) {
-      try { d.perms[n] = (await navigator.permissions.query({ name: n })).state; } catch (e) { d.perms[n] = 'error'; }
-    }
-    return d;
+  function freshIframe(mode) {
+    const f = document.createElement('iframe');
+    f.style.display = 'none';
+    if (mode === 'srcdoc') f.srcdoc = '<!DOCTYPE html><html></html>';
+    document.body.appendChild(f);
+    return f;
   }
 
-  function diffObjects(a, b) {
-    const lines = [];
-    function walk(pa, pb, path) {
-      if (Array.isArray(pa) && Array.isArray(pb) && pa.every(function (x) { return typeof x === 'string'; })) {
-        const sa = new Set(pa), sb = new Set(pb);
-        const onlyA = pa.filter(function (x) { return !sb.has(x); });
-        const onlyB = pb.filter(function (x) { return !sa.has(x); });
-        if (onlyA.length || onlyB.length) lines.push({ path: path, onlyA: onlyA, onlyB: onlyB });
-        return;
-      }
-      if (pa && pb && typeof pa === 'object' && typeof pb === 'object' && !Array.isArray(pa)) {
-        const keys = Array.from(new Set(Object.keys(pa).concat(Object.keys(pb)))).sort();
-        keys.forEach(function (k) { walk(pa[k], pb[k], path ? path + '.' + k : k); });
-        return;
-      }
-      if (JSON.stringify(pa) !== JSON.stringify(pb)) lines.push({ path: path, a: pa, b: pb });
+  function targets() {
+    const t = [];
+    function add2(proto, name) { if (proto && Object.getOwnPropertyDescriptor(proto, name)) t.push([proto, name]); }
+    add2(HTMLCanvasElement.prototype, 'toDataURL');
+    add2(HTMLCanvasElement.prototype, 'toBlob');
+    add2(CanvasRenderingContext2D.prototype, 'getImageData');
+    if (typeof WebGLRenderingContext !== 'undefined') {
+      add2(WebGLRenderingContext.prototype, 'getParameter');
+      add2(WebGLRenderingContext.prototype, 'readPixels');
     }
-    walk(a, b, '');
-    return lines;
-  }
-
-  function show(lines) {
-    const rep = document.getElementById('report');
-    rep.textContent = '';
-    const head = document.createElement('div');
-    head.className = 'sec';
-    head.textContent = lines.length + ' perbedaan (A = Chrome asli, B = fork)';
-    rep.appendChild(head);
-    lines.forEach(function (l) {
-      const k = document.createElement('div'); k.className = 'k'; k.textContent = l.path; rep.appendChild(k);
-      if (l.onlyA) {
-        if (l.onlyA.length) { const p = document.createElement('pre'); p.className = 'a'; p.textContent = 'hanya di A (hilang di fork): ' + l.onlyA.join(', '); rep.appendChild(p); }
-        if (l.onlyB.length) { const p = document.createElement('pre'); p.className = 'b'; p.textContent = 'hanya di B (tambahan fork): ' + l.onlyB.join(', '); rep.appendChild(p); }
-      } else {
-        const p = document.createElement('pre');
-        p.textContent = 'A: ' + JSON.stringify(l.a) + '   |   B: ' + JSON.stringify(l.b);
-        rep.appendChild(p);
-      }
-    });
-    document.getElementById('out').value = lines.map(function (l) {
-      return l.onlyA ? l.path + ' | hanya A: ' + l.onlyA.join(',') + ' | hanya B: ' + l.onlyB.join(',')
-                     : l.path + ' | A=' + JSON.stringify(l.a) + ' | B=' + JSON.stringify(l.b);
-    }).join(String.fromCharCode(10));
-  }
-
-  function updateCount(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text.length.toLocaleString() + ' karakter';
-  }
-
-  document.getElementById('A').oninput = function() { updateCount('countA', this.value); };
-  document.getElementById('B').oninput = function() { updateCount('countB', this.value); };
-
-  function handleFileUpload(inputEl, textareaEl, countId) {
-    inputEl.onchange = function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(evt) {
-        textareaEl.value = evt.target.result;
-        updateCount(countId, evt.target.result);
-      };
-      reader.readAsText(file);
-    };
-  }
-
-  handleFileUpload(document.getElementById('fileA'), document.getElementById('A'), 'countA');
-  handleFileUpload(document.getElementById('fileB'), document.getElementById('B'), 'countB');
-
-  document.getElementById('dump').onclick = async function () {
-    document.getElementById('out').value = 'Mengambil data...';
-    try {
-      const res = JSON.stringify(await dump());
-      document.getElementById('out').value = res;
-    } catch (e) {
-      document.getElementById('out').value = 'Gagal: ' + e;
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      add2(WebGL2RenderingContext.prototype, 'getParameter');
+      add2(WebGL2RenderingContext.prototype, 'readPixels');
     }
-  };
+    if (typeof AudioBuffer !== 'undefined') add2(AudioBuffer.prototype, 'getChannelData');
+    return t;
+  }
 
-  document.getElementById('download').onclick = function () {
-    const val = document.getElementById('out').value;
-    if (!val || !val.startsWith('{')) {
-      alert('Jalankan "1. Dump (browser ini)" terlebih dahulu!');
-      return;
-    }
-    const blob = new Blob([val], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'dump_' + (navigator.userAgent.indexOf('Chrome/') !== -1 ? 'chrome' : 'browser') + '_' + Date.now() + '.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  function testToString() {
+    const ts = Function.prototype.toString;
+    check(NATIVE_RE.test(ts.call(ts)), 'toString milik toString terlihat native', ts.call(ts));
 
-  document.getElementById('copy').onclick = function () {
-    const val = document.getElementById('out').value;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(val).then(function() {
-        alert('Teks berhasil disalin ke Clipboard!');
-      }).catch(function() {
-        fallbackCopy();
+    ['about:blank', 'srcdoc'].forEach(function (mode) {
+      let w;
+      try { w = freshIframe(mode === 'srcdoc' ? 'srcdoc' : 'blank').contentWindow; } catch (e) { add('info', 'iframe ' + mode, String(e)); return; }
+      const cleanTS = w.Function.prototype.toString;
+      targets().forEach(function (p) {
+        const fn = p[0][p[1]];
+        const s = cleanTS.call(fn);
+        check(NATIVE_RE.test(s), 'cross-realm toString [' + mode + '] ' + p[1], s.slice(0, 60).replace(/\s+/g, ' '));
       });
-    } else {
-      fallbackCopy();
-    }
-  };
+      // apakah realm iframe ikut ter-patch (iframe dibuat via script)?
+      try {
+        const ifnTS = w.Function.prototype.toString.toString();
+        add('info', 'iframe [' + mode + '] toString-nya sendiri', ifnTS.slice(0, 60));
+      } catch (e) {}
+    });
+  }
 
-  function fallbackCopy() {
-    const o = document.getElementById('out'); o.select();
-    try {
-      document.execCommand('copy');
-      alert('Teks disalin (fallback)!');
-    } catch (e) {
-      alert('Gagal menyalin otomatis. Silakan salin manual.');
+  function testShape() {
+    targets().forEach(function (p) {
+      const fn = p[0][p[1]];
+      const ts = Function.prototype.toString.call(fn);
+      check(NATIVE_RE.test(ts), 'toString same-realm ' + p[1], ts);
+      check(!Object.prototype.hasOwnProperty.call(fn, 'prototype'), 'tanpa .prototype ' + p[1]);
+      check(fn.name === p[1], 'name ' + p[1], fn.name);
+      let threw = false, stack = '';
+      try { fn.call({}); } catch (e) { threw = true; stack = String(e.stack); }
+      check(threw, 'melempar error pada this salah ' + p[1]);
+      const leak = /__fp_src__|Reflect\.apply|Proxy|new Proxy/.test(stack);
+      check(!leak, 'stack bersih ' + p[1], leak ? stack.split(String.fromCharCode(10)).slice(0, 4).join(' | ') : '');
+    });
+    try { Function.prototype.toString.call({}); } catch (e) {
+      const st = String(e.stack);
+      check(!/__fp_src__|Reflect\.apply/.test(st), 'stack toString.call({}) bersih', st.split(String.fromCharCode(10)).slice(0, 3).join(' | '));
     }
   }
 
-  document.getElementById('cmp').onclick = function () {
-    const rawA = document.getElementById('A').value.trim();
-    const rawB = document.getElementById('B').value.trim();
-
-    if (!rawA || !rawB) {
-      alert('Harap isi kedua kotak A dan B!');
-      return;
+  function canvasTests() {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const ctx = c.getContext('2d');
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      ctx.fillStyle = 'rgb(' + ((x * 7 + y * 3) & 255) + ',' + ((x * 5 + y * 11) & 255) + ',' + ((x ^ y) * 4 & 255) + ')';
+      ctx.fillRect(x, y, 1, 1);
     }
+    const full1 = ctx.getImageData(0, 0, 64, 64).data;
+    const full2 = ctx.getImageData(0, 0, 64, 64).data;
+    let det = true;
+    for (let i = 0; i < full1.length; i++) if (full1[i] !== full2[i]) { det = false; break; }
+    check(det, 'canvas: dua pembacaan penuh identik');
 
+    let mis = 0;
+    for (let ty = 0; ty < 64; ty += 16) for (let tx = 0; tx < 64; tx += 16) {
+      const t = ctx.getImageData(tx, ty, 16, 16).data;
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const a = ((ty + y) * 64 + tx + x) * 4, b = (y * 16 + x) * 4;
+        for (let k = 0; k < 4; k++) if (full1[a + k] !== t[b + k]) mis++;
+      }
+    }
+    check(mis === 0, 'canvas: baca penuh = gabungan tile 16x16 (konten non-seragam)', 'selisih ' + mis);
+
+    let px = 0;
+    for (let y = 0; y < 64; y += 1) for (let x = 0; x < 64; x += 1) {
+      const d = ctx.getImageData(x, y, 1, 1).data, a = (y * 64 + x) * 4;
+      for (let k = 0; k < 4; k++) if (d[k] !== full1[a + k]) px++;
+    }
+    check(px === 0, 'canvas: baca per piksel (1x1) = baca penuh', 'selisih ' + px + ' (>0 berarti noise bergantung ukuran region)');
+
+    const c2 = document.createElement('canvas'); c2.width = 100; c2.height = 100;
+    const x2 = c2.getContext('2d');
+    x2.fillStyle = 'rgb(10,120,200)'; x2.fillRect(0, 0, 100, 100);
+    const sd = x2.getImageData(0, 0, 100, 100).data;
+    let solid = true;
+    for (let i = 4; i < sd.length; i += 4) if (sd[i] !== sd[0] || sd[i + 1] !== sd[1] || sd[i + 2] !== sd[2]) { solid = false; break; }
+    check(solid, 'canvas: warna solid tetap solid (tidak ada noise)');
+
+    const c3 = document.createElement('canvas'); c3.width = 32; c3.height = 32;
+    const x3 = c3.getContext('2d');
+    const id = x3.createImageData(32, 32);
+    for (let i = 0; i < id.data.length; i += 4) { id.data[i] = (i / 4) & 255; id.data[i + 1] = 90; id.data[i + 2] = (i / 8) & 255; id.data[i + 3] = 255; }
+    x3.putImageData(id, 0, 0);
+    const back = x3.getImageData(0, 0, 32, 32).data;
+    let rt = 0;
+    for (let i = 0; i < back.length; i++) if (back[i] !== id.data[i]) rt++;
+    check(rt === 0, 'canvas: putImageData lalu getImageData identik', 'selisih ' + rt);
+
+    const du1 = c.toDataURL(), du2 = c.toDataURL();
+    check(du1 === du2, 'canvas: dua toDataURL identik');
+  }
+
+  function glInfo(gl) {
+    const d = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor: gl.getParameter(gl.VENDOR), renderer: gl.getParameter(gl.RENDERER),
+      uvendor: d ? gl.getParameter(d.UNMASKED_VENDOR_WEBGL) : null,
+      urenderer: d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : null
+    };
+  }
+
+  function glTests() {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+    const gl = c.getContext('webgl', { preserveDrawingBuffer: true });
+    if (!gl) { add('info', 'WebGL tidak tersedia'); return null; }
+    const info = glInfo(gl);
+    add('info', 'WebGL main', JSON.stringify(info));
+    gl.enable(gl.SCISSOR_TEST);
+    const cols = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]];
+    [[0, 0], [32, 0], [0, 32], [32, 32]].forEach(function (o, i) {
+      gl.scissor(o[0], o[1], 32, 32);
+      gl.clearColor(cols[i][0], cols[i][1], cols[i][2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    });
+    const a = new Uint8Array(64 * 64 * 4), b = new Uint8Array(64 * 64 * 4);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, a);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, b);
+    let diff = 0, changed = 0;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+    check(diff === 0, 'webgl: dua readPixels identik');
+    // kuadran merah murni: piksel yang menyimpang dari nilai asli = noise
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const i = (y * 64 + x) * 4;
+      if (a[i] !== 255 || a[i + 1] !== 0 || a[i + 2] !== 0) changed++;
+    }
+    add('info', 'webgl: piksel menyimpang di area solid', changed);
+    return info;
+  }
+
+
+  async function glPathTest() {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+    const gl = c.getContext('webgl', { preserveDrawingBuffer: true, antialias: false });
+    if (!gl) { add('info', 'glPath: WebGL tidak tersedia'); return; }
+    function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+    const pr = gl.createProgram();
+    gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}'));
+    gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, 'precision mediump float;varying vec2 v;void main(){gl_FragColor=vec4(v.x,v.y,fract(v.x*7.0+v.y*3.0),1.);}'));
+    gl.linkProgram(pr); gl.useProgram(pr);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.viewport(0, 0, 64, 64); gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Jalur A: readPixels (origin kiri-bawah -> balik ke kiri-atas)
+    const raw = new Uint8Array(64 * 64 * 4);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const A = new Uint8Array(raw.length);
+    for (let y = 0; y < 64; y++) A.set(raw.subarray((63 - y) * 256, (64 - y) * 256), y * 256);
+
+    // Jalur B: drawImage ke canvas 2D lalu getImageData
+    const c2 = document.createElement('canvas'); c2.width = 64; c2.height = 64;
+    const x2 = c2.getContext('2d'); x2.drawImage(c, 0, 0);
+    const B = x2.getImageData(0, 0, 64, 64).data;
+
+    // Jalur C: toDataURL lalu dimuat sebagai gambar
+    const img = new Image();
+    await new Promise(function (ok, no) { img.onload = ok; img.onerror = no; img.src = c.toDataURL(); });
+    const c3 = document.createElement('canvas'); c3.width = 64; c3.height = 64;
+    const x3 = c3.getContext('2d'); x3.drawImage(img, 0, 0);
+    const C = x3.getImageData(0, 0, 64, 64).data;
+
+    function diff(P, Q) { let n = 0; for (let i = 0; i < P.length; i++) if (P[i] !== Q[i]) n++; return n; }
+    const ab = diff(A, B), bc = diff(B, C), ac = diff(A, C);
+    check(ab === 0, 'webgl jalur: readPixels = drawImage+getImageData', 'selisih ' + ab);
+    check(bc === 0, 'webgl jalur: drawImage+getImageData = toDataURL', 'selisih ' + bc);
+    check(ac === 0, 'webgl jalur: readPixels = toDataURL', 'selisih ' + ac);
+  }
+
+
+  async function audioTests() {
+    if (typeof OfflineAudioContext === 'undefined') { add('info', 'audio: OfflineAudioContext tidak tersedia'); return; }
+    function fp() {
+      const ctx = new OfflineAudioContext(1, 5000, 44100);
+      const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 10000;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -50; comp.knee.value = 40; comp.ratio.value = 12; comp.attack.value = 0; comp.release.value = 0.25;
+      osc.connect(comp); comp.connect(ctx.destination); osc.start(0);
+      return ctx.startRendering();
+    }
+    function sum(a) { let s = 0; for (let i = 4500; i < 5000; i++) s += Math.abs(a[i]); return s; }
+    function same(a, b) { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; }
+
+    const b1 = await fp(), b2 = await fp();
+    const g1 = b1.getChannelData(0), g2 = b2.getChannelData(0);
+    check(same(g1, g2), 'audio: dua render identik');
+    add('info', 'audio: sum[4500..5000)', sum(g1));
+
+    const dest = new Float32Array(5000); b1.copyFromChannel(dest, 0, 0);
+    check(same(dest, g1), 'audio: copyFromChannel = getChannelData');
+    check(b1.getChannelData(0) === b1.getChannelData(0), 'audio: getChannelData mengembalikan objek yang sama');
+
+    // sinyal konstan harus tetap konstan (tes noise klasik)
+    const cctx = new OfflineAudioContext(1, 5000, 44100);
+    const cs = cctx.createConstantSource(); cs.offset.value = 0.5; cs.connect(cctx.destination); cs.start(0);
+    const cb = await cctx.startRendering(); const cd = cb.getChannelData(0);
+    let flat = true; for (let i = 1; i < cd.length; i++) if (cd[i] !== cd[0]) { flat = false; break; }
+    check(flat, 'audio: sinyal konstan tetap konstan');
+
+    // render hening harus tetap nol
+    const sctx = new OfflineAudioContext(1, 5000, 44100);
+    const sb = await sctx.startRendering(); const sd = sb.getChannelData(0);
+    let zero = true; for (let i = 0; i < sd.length; i++) if (sd[i] !== 0) { zero = false; break; }
+    check(zero, 'audio: hening tetap nol');
+
+    // baca lewat getter realm iframe (jika bersih) lalu lewat getter halaman: apakah data berubah di tempat?
     try {
-      const a = JSON.parse(rawA);
-      const b = JSON.parse(rawB);
-      show(diffObjects(a, b));
-    } catch (e) {
-      document.getElementById('out').value = 'JSON A/B tidak valid: ' + e;
+      const w = freshIframe('blank').contentWindow;
+      const cleanGCD = w.AudioBuffer.prototype.getChannelData;
+      const b3 = await fp();
+      const early = cleanGCD.call(b3, 0);
+      const before = sum(early);
+      b3.getChannelData(0);
+      const after = sum(early);
+      add('info', 'audio: data berubah di tempat setelah baca lewat halaman? (batas bawaan pendekatan JS)', before === after ? 'tidak' : 'ya (' + before + ' -> ' + after + ')');
+    } catch (e) { add('info', 'audio: uji realm iframe gagal', String(e)); }
+  }
+
+
+  async function uaTests() {
+    const ua = navigator.userAgent;
+    const m = /^Mozilla\/5\.0 \(Linux; Android 10; K\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/(\d+)\.0\.0\.0 Mobile Safari\/537\.36$/.exec(ua);
+    check(!!m, 'UA berformat Chrome Android reduced (Android 10; K, Chrome/MAJOR.0.0.0 Mobile)', ua);
+    check(/^Linux (aarch64|armv\d+[a-z]*\d*)$/.test(navigator.platform), 'navigator.platform berformat Linux <arsitektur>', navigator.platform);
+    try {
+      const wf = freshIframe('blank').contentWindow;
+      check(wf.navigator.platform === navigator.platform, 'navigator.platform main = iframe', navigator.platform + ' / ' + wf.navigator.platform);
+    } catch (e) { add('info', 'platform iframe gagal', String(e)); }
+    check(navigator.vendor === 'Google Inc.', 'navigator.vendor', navigator.vendor);
+    check(navigator.appVersion === ua.replace('Mozilla/', ''), 'appVersion konsisten dengan userAgent');
+    if (!navigator.userAgentData) { add('info', 'userAgentData tidak tersedia (konteks tidak aman?)'); return; }
+    const u = navigator.userAgentData;
+    check(u.mobile === true, 'userAgentData.mobile true');
+    check(u.platform === 'Android', 'userAgentData.platform Android', u.platform);
+    const names = u.brands.map(function (b) { return b.brand; });
+    check(names.indexOf('Chromium') !== -1 && names.indexOf('Google Chrome') !== -1, 'brands memuat Chromium dan Google Chrome', names.join(','));
+    if (m) {
+      const major = m[1];
+      check(u.brands.every(function (b) { return /^Not.A.Brand$/.test(b.brand) || b.version === major; }), 'versi brand = versi mayor UA', JSON.stringify(u.brands));
     }
+    const hi = await u.getHighEntropyValues(['model', 'platformVersion', 'fullVersionList', 'uaFullVersion', 'architecture', 'bitness']);
+    add('info', 'high-entropy', JSON.stringify(hi));
+    check(typeof hi.model === 'string' && hi.model.length > 0 && hi.model !== 'K', 'high-entropy model berisi model sebenarnya (bukan "K")', hi.model);
+    check(/^\d+\.\d+\.\d+$/.test(hi.platformVersion || ''), 'platformVersion berformat X.Y.Z', hi.platformVersion);
+    const fv = hi.fullVersionList || [];
+    check(fv.some(function (b) { return b.brand === 'Google Chrome' && /^\d+\.\d+\.\d+\.\d+$/.test(b.version); }), 'fullVersionList Google Chrome berformat penuh', JSON.stringify(fv));
+  }
+
+
+  async function parityTests() {
+    check(typeof window.chrome === 'object' && window.chrome !== null && typeof window.chrome.csi === 'function' && typeof window.chrome.loadTimes === 'function',
+          'window.chrome ada (csi, loadTimes) seperti Chrome Android', typeof window.chrome);
+    if (typeof window.chrome === 'object' && window.chrome) {
+      check(Object.keys(window.chrome).join(',') === 'csi,loadTimes', 'window.chrome hanya berisi csi dan loadTimes', Object.keys(window.chrome).join(','));
+      try {
+        const lt = window.chrome.loadTimes(), cs = window.chrome.csi();
+        check(typeof lt.requestTime === 'number' && typeof cs.pageT === 'number', 'chrome.loadTimes()/csi() mengembalikan angka');
+      } catch (e) { add('fail', 'chrome.loadTimes()/csi() melempar error', String(e)); }
+    }
+    check(typeof window.Notification === 'function', 'Notification ada', typeof window.Notification);
+    if (typeof window.Notification === 'function') {
+      check(Notification.permission === 'default', 'Notification.permission awal "default"', Notification.permission);
+      try {
+        const st = await navigator.permissions.query({ name: 'notifications' });
+        check(st.state === 'prompt', 'permissions.query(notifications) = prompt saat permission default', st.state);
+      } catch (e) { add('info', 'permissions.query notifications gagal', String(e)); }
+    }
+    for (const n of ['geolocation', 'clipboard-read', 'persistent-storage', 'midi']) {
+      try {
+        const st = await navigator.permissions.query({ name: n });
+        check(st.state === 'prompt', 'permissions.query(' + n + ') = prompt (Chrome asli)', st.state);
+      } catch (e) { add('info', 'permissions.query ' + n + ' gagal', String(e)); }
+    }
+    const c = navigator.connection;
+    if (c) check(!(c.rtt === 0 && c.downlink === 10), 'navigator.connection bukan nilai bawaan WebView (rtt 0 / downlink 10)', c.rtt + ' / ' + c.downlink);
+    const names = Object.getOwnPropertyNames(window);
+    ['MiWebViewDetector', 'android', 'AndroidInterface', '__blobRevokeHooked', 'configString', 'config', 'currentDomain',
+     'isSubdomain', 'optOutCookies', 'presenceElements', 'cookie', 'links', 'item', 'k', 'i'].forEach(function (n) {
+      check(names.indexOf(n) === -1, 'tidak ada global bocor: ' + n);
+    });
+    check(!('cpuPerformance' in Navigator.prototype), 'tidak ada navigator.cpuPerformance (penanda WebView Xiaomi)');
+    try {
+      const w = freshIframe('blank').contentWindow;
+      add('info', 'iframe baru: window.chrome', typeof w.chrome + ' | Notification: ' + typeof w.Notification + ' | platform: ' + w.navigator.platform);
+    } catch (e) {}
+  }
+
+  function workerTest(mainGl) {
+    return new Promise(function (resolve) {
+      let w;
+      try {
+        const src = [
+          'self.onmessage=async function(){var r={};',
+          'try{r.brands=navigator.userAgentData?navigator.userAgentData.brands.map(function(b){return b.brand}).join(","):null}catch(e){}',
+          'try{var c=new OffscreenCanvas(8,8);var gl=c.getContext("webgl");var d=gl.getExtension("WEBGL_debug_renderer_info");',
+          'r.uvendor=gl.getParameter(d.UNMASKED_VENDOR_WEBGL);r.urenderer=gl.getParameter(d.UNMASKED_RENDERER_WEBGL)}catch(e){r.glErr=String(e)}',
+          'r.hc=navigator.hardwareConcurrency;r.ua=navigator.userAgent;r.platform=navigator.platform;r.lang=navigator.language;postMessage(r)}'
+        ].join('');
+        w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      } catch (e) { add('info', 'Worker tidak bisa dibuat', String(e)); resolve(); return; }
+      const timer = setTimeout(function () { add('fail', 'Worker tidak menjawab (timeout 4 dtk)'); resolve(); }, 4000);
+      w.onmessage = function (ev) {
+        clearTimeout(timer);
+        const r = ev.data;
+        add('info', 'Worker', JSON.stringify(r));
+        const mainBrands = navigator.userAgentData ? navigator.userAgentData.brands.map(function (b) { return b.brand; }).join(',') : null;
+        check(r.brands === mainBrands, 'brands main = worker', 'main=' + mainBrands + ' worker=' + r.brands);
+        check(r.ua === navigator.userAgent, 'userAgent main = worker');
+        check(r.hc === navigator.hardwareConcurrency, 'hardwareConcurrency main = worker');
+        check(r.platform === navigator.platform, 'navigator.platform main = worker', navigator.platform + ' / ' + r.platform);
+        check(r.lang === navigator.language, 'navigator.language main = worker', navigator.language + ' / ' + r.lang);
+        if (mainGl && !r.glErr) {
+          check(r.uvendor === mainGl.uvendor, 'WebGL unmasked vendor main = worker (FAIL wajar bila SPOOF_GPU aktif)', mainGl.uvendor + ' / ' + r.uvendor);
+          check(r.urenderer === mainGl.urenderer, 'WebGL unmasked renderer main = worker (FAIL wajar bila SPOOF_GPU aktif)', mainGl.urenderer + ' / ' + r.urenderer);
+        }
+        w.terminate();
+        resolve();
+      };
+      w.onerror = function (e) { clearTimeout(timer); add('fail', 'Worker error', e.message); resolve(); };
+      w.postMessage(1);
+    });
+  }
+
+  function testNavigator() {
+    add('info', 'userAgent', navigator.userAgent);
+    check(!/; wv\)/.test(navigator.userAgent), 'UA tanpa penanda "; wv)"');
+    check(!/Version\/4\.0/.test(navigator.userAgent), 'UA tanpa "Version/4.0"');
+    if (navigator.userAgentData) {
+      const names = navigator.userAgentData.brands.map(function (b) { return b.brand; });
+      check(names.indexOf('Android WebView') === -1, 'brands tanpa "Android WebView"', names.join(','));
+    }
+  }
+
+  document.getElementById('go').onclick = async function () {
+    resEl.textContent = '';
+    report.length = 0;
+    try { testNavigator(); } catch (e) { add('fail', 'testNavigator error', e); }
+    try { await uaTests(); } catch (e) { add('fail', 'uaTests error', e); }
+    try { await parityTests(); } catch (e) { add('fail', 'parityTests error', e); }
+    try { testToString(); } catch (e) { add('fail', 'testToString error', e); }
+    try { testShape(); } catch (e) { add('fail', 'testShape error', e); }
+    try { canvasTests(); } catch (e) { add('fail', 'canvasTests error', e); }
+    let gi = null;
+    try { gi = glTests(); } catch (e) { add('fail', 'glTests error', e); }
+    try { await glPathTest(); } catch (e) { add('fail', 'glPathTest error', e); }
+    try { await audioTests(); } catch (e) { add('fail', 'audioTests error', e); }
+    try { await workerTest(gi); } catch (e) { add('fail', 'workerTest error', e); }
+    const fails = report.filter(function (r) { return r.kind === 'fail'; }).length;
+    add('info', 'Selesai', fails + ' FAIL dari ' + report.filter(function (r) { return r.kind !== 'info'; }).length + ' cek');
+    document.getElementById('out').value = report.map(function (r) { return r.kind.toUpperCase() + ' ' + r.name + (r.detail ? ' :: ' + r.detail : ''); }).join(String.fromCharCode(10));
+  };
+  document.getElementById('copy').onclick = function () {
+    const o = document.getElementById('out'); o.select();
+    try { document.execCommand('copy'); } catch (e) {}
   };
 })();
 </script>
