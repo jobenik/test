@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API surface dump / compare</title>
+<style>
+  body { font-family: sans-serif; margin: 12px; font-size: 14px; }
+  button { padding: 8px 14px; font-size: 14px; margin: 4px 6px 4px 0; cursor: pointer; }
+  textarea { width: 100%; height: 20vh; font-family: monospace; font-size: 11px; margin-top: 6px; box-sizing: border-box; }
+  .sec { border-top: 2px solid #888; margin-top: 14px; padding-top: 6px; }
+  .k { font-weight: bold; margin-top: 8px; }
+  .a { color: #0a5; } .b { color: #c0182d; } .v { color: #555; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 2px 0; }
+  .file-input { margin: 4px 0; font-size: 12px; }
+  .box-label { font-weight: bold; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .char-count { font-weight: normal; font-size: 12px; color: #666; }
+</style>
+</head>
+<body>
+<h3>API surface dump / compare</h3>
+<p>
+  1) Jalankan <b>Dump</b> lalu <b>Download JSON</b> di Chrome Asli (HP yang sama).<br>
+  2) Jalankan <b>Dump</b> lalu <b>Download JSON</b> di Browser Fork Anda.<br>
+  3) Pilih file JSON untuk kotak A dan B (atau tempel manual), lalu tekan <b>Bandingkan A dan B</b>.
+</p>
+
+<div>
+  <button id="dump">1. Dump (browser ini)</button>
+  <button id="download">2. Download JSON Dump</button>
+  <button id="copy">Copy ke Clipboard</button>
+  <button id="cmp" style="background:#0275d8; color:#fff; border:none; font-weight:bold;">3. Bandingkan A dan B</button>
+</div>
+
+<div class="box-label">
+  <span>A = Chrome Asli</span>
+  <span id="countA" class="char-count">0 karakter</span>
+</div>
+<input type="file" id="fileA" class="file-input" accept=".json,text/plain">
+<textarea id="A" placeholder="Tempel JSON Chrome Asli di sini atau upload file di atas..."></textarea>
+
+<div class="box-label">
+  <span>B = Browser Fork</span>
+  <span id="countB" class="char-count">0 karakter</span>
+</div>
+<input type="file" id="fileB" class="file-input" accept=".json,text/plain">
+<textarea id="B" placeholder="Tempel JSON Browser Fork di sini atau upload file di atas..."></textarea>
+
+<div class="box-label">
+  <span>Hasil Dump / Ringkasan Perbandingan</span>
+</div>
+<textarea id="out" readonly></textarea>
+<div id="report"></div>
+
+<script>
+(function () {
+  function sortedNames(o) { try { return Object.getOwnPropertyNames(o).sort(); } catch (e) { return []; } }
+  function has(o, k) { try { return k in o; } catch (e) { return false; } }
+  function typ(f) { try { return typeof f(); } catch (e) { return 'error'; } }
+
+  async function dump() {
+    const d = {};
+    d.window = sortedNames(window).filter(function (k) { return !/^\d+$/.test(k); });
+    d.navigatorProto = sortedNames(Navigator.prototype);
+    d.navigatorOwn = sortedNames(navigator);
+    d.documentProto = sortedNames(Document.prototype);
+    d.elementProto = sortedNames(Element.prototype);
+    d.htmlElementCtors = d.window.filter(function (k) { return /^HTML.*Element$/.test(k) || /^SVG.*Element$/.test(k); });
+    d.cssProto = sortedNames(CSSStyleDeclaration.prototype).length;
+    d.chromeObject = (typeof window.chrome === 'object' && window.chrome) ? sortedNames(window.chrome) : null;
+    d.chromeRuntime = (window.chrome && window.chrome.runtime) ? sortedNames(window.chrome.runtime) : null;
+
+    d.scalars = {
+      platform: navigator.platform, vendor: navigator.vendor, vendorSub: navigator.vendorSub, product: navigator.product,
+      productSub: navigator.productSub, appName: navigator.appName, appCodeName: navigator.appCodeName,
+      appVersion: navigator.appVersion, language: navigator.language, languages: (navigator.languages || []).join(','),
+      hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory,
+      maxTouchPoints: navigator.maxTouchPoints, cookieEnabled: navigator.cookieEnabled, onLine: navigator.onLine,
+      webdriver: navigator.webdriver, doNotTrack: String(navigator.doNotTrack), gpc: String(navigator.globalPrivacyControl),
+      pdfViewerEnabled: navigator.pdfViewerEnabled, plugins: navigator.plugins ? navigator.plugins.length : null,
+      mimeTypes: navigator.mimeTypes ? navigator.mimeTypes.length : null,
+      pluginNames: navigator.plugins ? Array.prototype.map.call(navigator.plugins, function (p) { return p.name; }).join(',') : null,
+      screen: [screen.width, screen.height, screen.availWidth, screen.availHeight, screen.colorDepth, screen.pixelDepth].join('x'),
+      dpr: window.devicePixelRatio, inner: window.innerWidth + 'x' + window.innerHeight, outer: window.outerWidth + 'x' + window.outerHeight,
+      visualViewport: window.visualViewport ? window.visualViewport.width + 'x' + window.visualViewport.height + '@' + window.visualViewport.scale : null,
+      orientation: screen.orientation ? screen.orientation.type + '/' + screen.orientation.angle : null,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone, tzOffset: new Date().getTimezoneOffset(),
+      locale: Intl.DateTimeFormat().resolvedOptions().locale,
+      secure: window.isSecureContext, crossOriginIsolated: window.crossOriginIsolated,
+      typeofChrome: typeof window.chrome, typeofNotification: typeof window.Notification,
+      notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : null,
+      mediaDevices: typ(function () { return navigator.mediaDevices; }),
+      connection: navigator.connection ? [navigator.connection.effectiveType, navigator.connection.rtt, navigator.connection.downlink, navigator.connection.saveData].join('/') : null,
+      speechVoices: window.speechSynthesis ? speechSynthesis.getVoices().length : null,
+      stackSample: (function () { try { null.x; } catch (e) { return String(e.message); } })()
+    };
+
+    d.features = {};
+    ['bluetooth', 'usb', 'serial', 'hid', 'share', 'canShare', 'contacts', 'getBattery', 'wakeLock', 'xr', 'gpu', 'ink',
+     'credentials', 'storage', 'locks', 'clipboard', 'geolocation', 'permissions', 'serviceWorker', 'mediaSession',
+     'presentation', 'virtualKeyboard', 'windowControlsOverlay', 'userActivation', 'managed', 'scheduling'].forEach(function (k) {
+      d.features['navigator.' + k] = has(navigator, k);
+    });
+    ['showOpenFilePicker', 'webkitRequestFileSystem', 'requestFileSystem', 'webkitSpeechRecognition', 'SpeechRecognition',
+     'RTCPeerConnection', 'webkitRTCPeerConnection', 'BarcodeDetector', 'EyeDropper', 'PaymentRequest', 'PresentationRequest',
+     'SharedWorker', 'AudioWorklet', 'OffscreenCanvas', 'WebAssembly', 'VideoDecoder', 'AudioDecoder', 'FileSystemHandle',
+     'DeviceMotionEvent', 'DeviceOrientationEvent', 'TouchEvent', 'PointerEvent', 'Gyroscope', 'Accelerometer', 'AmbientLightSensor',
+     'ScreenDetailed', 'Highlight', 'CSSPropertyRule', 'ViewTransition', 'SpeechSynthesisUtterance', 'MediaRecorder',
+     'ImageCapture', 'RemotePlayback', 'NetworkInformation', 'CookieStore', 'LaunchQueue', 'BeforeInstallPromptEvent'].forEach(function (k) {
+      d.features['window.' + k] = has(window, k);
+    });
+
+    d.css = {};
+    [['display', 'grid'], ['display', 'contents'], ['color', 'color(display-p3 1 0 0)'], ['width', 'min(1px, 2px)'],
+     ['aspect-ratio', '1/1'], ['backdrop-filter', 'blur(2px)'], ['-webkit-app-region', 'drag'], ['container-type', 'inline-size'],
+     ['text-wrap', 'balance'], ['scroll-timeline', 'none'], ['field-sizing', 'content'], ['anchor-name', '--a'],
+     ['overscroll-behavior', 'contain'], ['accent-color', 'red'], ['-webkit-text-stroke', '1px red'], ['font-variant-emoji', 'text']].forEach(function (p) {
+      d.css[p[0] + ':' + p[1]] = CSS.supports(p[0], p[1]);
+    });
+
+    d.media = {};
+    ['(pointer: coarse)', '(pointer: fine)', '(any-pointer: coarse)', '(hover: none)', '(hover: hover)', '(any-hover: none)',
+     '(prefers-color-scheme: dark)', '(prefers-reduced-motion: reduce)', '(prefers-contrast: more)', '(display-mode: standalone)',
+     '(display-mode: browser)', '(color-gamut: p3)', '(dynamic-range: high)', '(forced-colors: active)', '(orientation: portrait)',
+     '(inverted-colors: inverted)', '(scripting: enabled)', '(update: fast)', '(overflow-block: scroll)'].forEach(function (q) {
+      d.media[q] = window.matchMedia(q).matches;
+    });
+
+    d.uaData = null;
+    if (navigator.userAgentData) {
+      d.uaData = { keys: sortedNames(Object.getPrototypeOf(navigator.userAgentData)), mobile: navigator.userAgentData.mobile, platform: navigator.userAgentData.platform };
+      try { d.uaData.high = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness', 'model', 'platformVersion', 'wow64', 'formFactors']); } catch (e) { d.uaData.high = String(e); }
+    }
+
+    d.perms = {};
+    for (const n of ['geolocation', 'notifications', 'camera', 'microphone', 'clipboard-read', 'persistent-storage', 'midi', 'accelerometer', 'background-sync']) {
+      try { d.perms[n] = (await navigator.permissions.query({ name: n })).state; } catch (e) { d.perms[n] = 'error'; }
+    }
+    return d;
+  }
+
+  function diffObjects(a, b) {
+    const lines = [];
+    function walk(pa, pb, path) {
+      if (Array.isArray(pa) && Array.isArray(pb) && pa.every(function (x) { return typeof x === 'string'; })) {
+        const sa = new Set(pa), sb = new Set(pb);
+        const onlyA = pa.filter(function (x) { return !sb.has(x); });
+        const onlyB = pb.filter(function (x) { return !sa.has(x); });
+        if (onlyA.length || onlyB.length) lines.push({ path: path, onlyA: onlyA, onlyB: onlyB });
+        return;
+      }
+      if (pa && pb && typeof pa === 'object' && typeof pb === 'object' && !Array.isArray(pa)) {
+        const keys = Array.from(new Set(Object.keys(pa).concat(Object.keys(pb)))).sort();
+        keys.forEach(function (k) { walk(pa[k], pb[k], path ? path + '.' + k : k); });
+        return;
+      }
+      if (JSON.stringify(pa) !== JSON.stringify(pb)) lines.push({ path: path, a: pa, b: pb });
+    }
+    walk(a, b, '');
+    return lines;
+  }
+
+  function show(lines) {
+    const rep = document.getElementById('report');
+    rep.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'sec';
+    head.textContent = lines.length + ' perbedaan (A = Chrome asli, B = fork)';
+    rep.appendChild(head);
+    lines.forEach(function (l) {
+      const k = document.createElement('div'); k.className = 'k'; k.textContent = l.path; rep.appendChild(k);
+      if (l.onlyA) {
+        if (l.onlyA.length) { const p = document.createElement('pre'); p.className = 'a'; p.textContent = 'hanya di A (hilang di fork): ' + l.onlyA.join(', '); rep.appendChild(p); }
+        if (l.onlyB.length) { const p = document.createElement('pre'); p.className = 'b'; p.textContent = 'hanya di B (tambahan fork): ' + l.onlyB.join(', '); rep.appendChild(p); }
+      } else {
+        const p = document.createElement('pre');
+        p.textContent = 'A: ' + JSON.stringify(l.a) + '   |   B: ' + JSON.stringify(l.b);
+        rep.appendChild(p);
+      }
+    });
+    document.getElementById('out').value = lines.map(function (l) {
+      return l.onlyA ? l.path + ' | hanya A: ' + l.onlyA.join(',') + ' | hanya B: ' + l.onlyB.join(',')
+                     : l.path + ' | A=' + JSON.stringify(l.a) + ' | B=' + JSON.stringify(l.b);
+    }).join(String.fromCharCode(10));
+  }
+
+  function updateCount(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text.length.toLocaleString() + ' karakter';
+  }
+
+  document.getElementById('A').oninput = function() { updateCount('countA', this.value); };
+  document.getElementById('B').oninput = function() { updateCount('countB', this.value); };
+
+  function handleFileUpload(inputEl, textareaEl, countId) {
+    inputEl.onchange = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        textareaEl.value = evt.target.result;
+        updateCount(countId, evt.target.result);
+      };
+      reader.readAsText(file);
+    };
+  }
+
+  handleFileUpload(document.getElementById('fileA'), document.getElementById('A'), 'countA');
+  handleFileUpload(document.getElementById('fileB'), document.getElementById('B'), 'countB');
+
+  document.getElementById('dump').onclick = async function () {
+    document.getElementById('out').value = 'Mengambil data...';
+    try {
+      const res = JSON.stringify(await dump());
+      document.getElementById('out').value = res;
+    } catch (e) {
+      document.getElementById('out').value = 'Gagal: ' + e;
+    }
+  };
+
+  document.getElementById('download').onclick = function () {
+    const val = document.getElementById('out').value;
+    if (!val || !val.startsWith('{')) {
+      alert('Jalankan "1. Dump (browser ini)" terlebih dahulu!');
+      return;
+    }
+    const blob = new Blob([val], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dump_' + (navigator.userAgent.indexOf('Chrome/') !== -1 ? 'chrome' : 'browser') + '_' + Date.now() + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  document.getElementById('copy').onclick = function () {
+    const val = document.getElementById('out').value;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(val).then(function() {
+        alert('Teks berhasil disalin ke Clipboard!');
+      }).catch(function() {
+        fallbackCopy();
+      });
+    } else {
+      fallbackCopy();
+    }
+  };
+
+  function fallbackCopy() {
+    const o = document.getElementById('out'); o.select();
+    try {
+      document.execCommand('copy');
+      alert('Teks disalin (fallback)!');
+    } catch (e) {
+      alert('Gagal menyalin otomatis. Silakan salin manual.');
+    }
+  }
+
+  document.getElementById('cmp').onclick = function () {
+    const rawA = document.getElementById('A').value.trim();
+    const rawB = document.getElementById('B').value.trim();
+
+    if (!rawA || !rawB) {
+      alert('Harap isi kedua kotak A dan B!');
+      return;
+    }
+
+    try {
+      const a = JSON.parse(rawA);
+      const b = JSON.parse(rawB);
+      show(diffObjects(a, b));
+    } catch (e) {
+      document.getElementById('out').value = 'JSON A/B tidak valid: ' + e;
+    }
+  };
+})();
+</script>
+</body>
+</html>
