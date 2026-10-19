@@ -349,6 +349,23 @@
     } catch (e) {}
   }
 
+
+  async function regionTests() {
+    const langs = JSON.stringify(navigator.languages);
+    check(langs === '["en-US","en"]', 'navigator.languages = ["en-US","en"] (seperti Chrome en-US)', langs);
+    check(navigator.language === 'en-US', 'navigator.language = en-US', navigator.language);
+    const ro = Intl.DateTimeFormat().resolvedOptions();
+    check(ro.locale === 'en-US', 'Intl locale = en-US', ro.locale);
+    add('info', 'zona waktu JS', ro.timeZone + ' | offset menit: ' + new Date().getTimezoneOffset());
+    try {
+      const r = await fetch('https://ipwho.is/', { cache: 'no-store' });
+      const j = await r.json();
+      const ipTz = j && j.timezone && j.timezone.id;
+      add('info', 'zona waktu menurut IP (ipwho.is)', ipTz + ' | IP: ' + (j && j.ip));
+      if (ipTz) check(ipTz === ro.timeZone, 'zona waktu JS = zona waktu IP', ro.timeZone + ' / ' + ipTz);
+    } catch (e) { add('info', 'lookup IP dari halaman gagal', String(e)); }
+  }
+
   function workerTest(mainGl) {
     return new Promise(function (resolve) {
       let w;
@@ -358,7 +375,7 @@
           'try{r.brands=navigator.userAgentData?navigator.userAgentData.brands.map(function(b){return b.brand}).join(","):null}catch(e){}',
           'try{var c=new OffscreenCanvas(8,8);var gl=c.getContext("webgl");var d=gl.getExtension("WEBGL_debug_renderer_info");',
           'r.uvendor=gl.getParameter(d.UNMASKED_VENDOR_WEBGL);r.urenderer=gl.getParameter(d.UNMASKED_RENDERER_WEBGL)}catch(e){r.glErr=String(e)}',
-          'r.hc=navigator.hardwareConcurrency;r.ua=navigator.userAgent;r.platform=navigator.platform;r.lang=navigator.language;postMessage(r)}'
+          'r.hc=navigator.hardwareConcurrency;r.ua=navigator.userAgent;r.platform=navigator.platform;r.lang=navigator.language;r.langs=JSON.stringify(navigator.languages);r.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;postMessage(r)}'
         ].join('');
         w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
       } catch (e) { add('info', 'Worker tidak bisa dibuat', String(e)); resolve(); return; }
@@ -373,6 +390,8 @@
         check(r.hc === navigator.hardwareConcurrency, 'hardwareConcurrency main = worker');
         check(r.platform === navigator.platform, 'navigator.platform main = worker', navigator.platform + ' / ' + r.platform);
         check(r.lang === navigator.language, 'navigator.language main = worker', navigator.language + ' / ' + r.lang);
+        check(r.langs === JSON.stringify(navigator.languages), 'navigator.languages main = worker', JSON.stringify(navigator.languages) + ' / ' + r.langs);
+        check(r.tz === Intl.DateTimeFormat().resolvedOptions().timeZone, 'zona waktu main = worker', Intl.DateTimeFormat().resolvedOptions().timeZone + ' / ' + r.tz);
         if (mainGl && !r.glErr) {
           check(r.uvendor === mainGl.uvendor, 'WebGL unmasked vendor main = worker (FAIL wajar bila SPOOF_GPU aktif)', mainGl.uvendor + ' / ' + r.uvendor);
           check(r.urenderer === mainGl.urenderer, 'WebGL unmasked renderer main = worker (FAIL wajar bila SPOOF_GPU aktif)', mainGl.urenderer + ' / ' + r.urenderer);
@@ -401,6 +420,7 @@
     try { testNavigator(); } catch (e) { add('fail', 'testNavigator error', e); }
     try { await uaTests(); } catch (e) { add('fail', 'uaTests error', e); }
     try { await parityTests(); } catch (e) { add('fail', 'parityTests error', e); }
+    try { await regionTests(); } catch (e) { add('fail', 'regionTests error', e); }
     try { testToString(); } catch (e) { add('fail', 'testToString error', e); }
     try { testShape(); } catch (e) { add('fail', 'testShape error', e); }
     try { canvasTests(); } catch (e) { add('fail', 'canvasTests error', e); }
